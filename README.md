@@ -4,10 +4,12 @@
 
 把 [biliup 系](https://github.com/biliup) 项目中的 `/crates` 目录链接到一个仓库内
 
+跟随 https://github.com/ZXGU183/biliup-rs 更新
+
 ## 作为子模块集成
 
 ```shell
-git submodule add https://github.com/ZXGU183/biliup-crates.git crates
+git submodule add -b biliup-rs https://github.com/ZXGU183/biliup-crates.git crates
 ```
 
 # stream-gears
