@@ -1,78 +1,96 @@
 name: CI
 
+# 当对同一个 PR 有新提交时，自动取消正在进行的旧构建
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
 on:
   push:
   pull_request:
+  # 允许从 GitHub Actions 页面手动触发此工作流
+  workflow_dispatch:
+    inputs:
+      publish_to_pypi:
+        description: '是否发布到 PyPI? (仅在手动触发时有效)'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
-  linux:
+  build-linux:
+    name: Build wheels on Linux
     runs-on: ubuntu-latest
-#    container: quay.io/pypa/manylinux2010_x86_64
     steps:
-    - uses: actions/checkout@v2
-#    - name: Install rust
-#      run: curl --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-#    - name: Installing custom dependency
-#      run: yum install -y openssl openssl-devel
-    - uses: messense/maturin-action@v1
+    - uses: actions/checkout@v4
+    - name: Build wheels
+      uses: messense/maturin-action@v1
       with:
-        manylinux: auto
+        manylinux: "2014"
         command: build
-        container: ghcr.io/biliup/manylinux2010
         args: --release -o dist
-#    - name: Build
-#      run: |
-#        source $HOME/.cargo/env
-#        pip3 install maturin
-#        maturin build --release --manylinux 2010 -o dist
-
     - name: Upload wheels
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v4
       with:
-        name: wheels
+        name: wheels-linux
         path: dist
 
-  windows:
+  build-windows:
+    name: Build wheels on Windows
     runs-on: windows-latest
     steps:
-    - uses: actions/checkout@v2
-    - uses: messense/maturin-action@v1
+    - uses: actions/checkout@v4
+    - name: Build wheels
+      uses: messense/maturin-action@v1
       with:
         command: build
         args: --release --no-sdist -o dist
     - name: Upload wheels
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v4
       with:
-        name: wheels
+        name: wheels-windows
         path: dist
 
-  macos:
+  build-macos:
+    name: Build wheels on macOS
     runs-on: macos-latest
     steps:
-    - uses: actions/checkout@v2
-    - uses: messense/maturin-action@v1
+    - uses: actions/checkout@v4
+    - name: Build wheels
+      uses: messense/maturin-action@v1
       with:
         command: build
         args: --release --no-sdist -o dist --universal2
     - name: Upload wheels
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v4
       with:
-        name: wheels
+        name: wheels-macos
         path: dist
 
   release:
-    name: Release
+    name: Release to PyPI
     runs-on: ubuntu-latest
-    if: "startsWith(github.ref, 'refs/tags/')"
-    needs: [ macos, windows, linux ]
+    # 仅在推送 tag 或手动触发并选择发布时运行
+    if: "startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_to_pypi == 'true')"
+    needs: [ build-macos, build-windows, build-linux ]
+    # 添加发布到 PyPI 所需的权限
+    permissions:
+      id-token: write
     steps:
-      - uses: actions/download-artifact@v2
+      - name: Download all wheels
+        uses: actions/download-artifact@v4
         with:
-          name: wheels
+          # 将所有工件下载到 dist 目录
+          path: dist
+          # 匹配所有以 wheels- 开头的工件
+          pattern: wheels-*
+          # 将所有工件内容合并到 path 指定的单个目录中
+          merge-multiple: true
+
       - name: Publish to PyPI
         uses: messense/maturin-action@v1
-        env:
-          MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
         with:
           command: upload
-          args: --skip-existing *
+          # --skip-existing: 如果版本已存在则跳过
+          # dist/*: 上传 dist 目录下的所有文件
+          args: --skip-existing dist/*
